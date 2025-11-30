@@ -9,6 +9,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime
 
 DATABASE_URL = "sqlite+aiosqlite:///./test.db"
+# we can't directly use DeclarativeBase so we create a subclass of it (we can't inert from it directly)
 class Base(DeclarativeBase):
     pass
 class Post(Base):
