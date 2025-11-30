@@ -1,0 +1,10 @@
+Include
+Lib
+Scripts
+.env
+__pycache__
+test.db
+*.pyc
+.vscode
+pyvenv.cfg
+pip-selfcheck.json
