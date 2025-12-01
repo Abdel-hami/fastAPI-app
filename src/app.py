@@ -4,7 +4,12 @@ from src.db import Post, create_db_and_tables, get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 from sqlalchemy import select
-
+from src.images import imagekit
+from imagekitio.models.UploadFileRequestOptions import UploadFileRequestOptions
+import shutil
+import os
+import uuid
+import  tempfile
 
 @asynccontextmanager
 async def lifespan(src: FastAPI):
@@ -13,26 +18,50 @@ async def lifespan(src: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# creating post and saving to database
+# Creating post and saving to database
+# Image and video upload
+# the process is when the user send us this file (file: UploadFile = File(...)) we are gonna create a temporary file (copy of this file) in our server, then we are going to upload that file to imagekit, once the upload is complete we are going to delete the temporary file from our server. 
 @app.post("/upload")
 async def upload_file(
     file: UploadFile = File(...), # this line is used to specify that the file parameter is required and should be provided as a file upload.
     caption: str = Form(""), # this line is used to specify that the caption parameter should be provided as form data.
     session: AsyncSession = Depends(get_async_session) # this means that the sessioon parameter will be automatically provided by FastAPI using the get_async_session dependency. wich means that an instance of AsyncSession will be created and passed to the upload_file function whenever it is called.
 ):
-    post = Post(
-        caption=caption,
-        url="dummy url",
-        file_type="photo",
-        file_name="dummy file name"
-    )
-    # adding the post to the session (database transaction)
-    session.add(post)
-    await session.commit()  # committing the transaction to save the post to the database
-    # session is asynchronous context manager that manages the database connection and transaction. and asynchronous is a programming paradigm that allows multiple tasks to run concurrently without blocking each other.
-    await session.refresh(post)  # refreshing the post instance to get the updated values from the database (like id and created_at)
-    return post
+    # creating a temporary file to store the uploaded file
+    temp_file_path = None
 
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
+            temp_file_path = temp_file.name
+            shutil.copyfileobj(file.file, temp_file)  # copying the uploaded file to the temporary file
+        # uploading the temporary file to imagekit
+
+        upload_result = imagekit.upload_file(
+        file=open(temp_file_path, "rb"),
+        file_name=file.filename,
+        options=UploadFileRequestOptions(
+            use_unique_file_name=True,
+            tags=["backend_upload", "tag2"]
+        ))
+
+        if upload_result.response.http_status_code == 200:
+            post = Post(
+                caption=caption,
+                url=upload_result.url,
+                file_type= "video" if file.content_type.startswith("video/") else "image",
+                file_name=upload_result.name
+            )
+            # adding the post to the session (database transaction)
+            session.add(post)
+            await session.commit()  # committing the transaction to save the post to the database
+            # session is asynchronous context manager that manages the database connection and transaction. and asynchronous is a programming paradigm that allows multiple tasks to run concurrently without blocking each other.
+            await session.refresh(post)  # refreshing the post instance to get the updated values from the database (like id and created_at)
+            return post
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)  # deleting the temporary file from the server
 
 # retrieving posts from database
 
